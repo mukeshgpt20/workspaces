@@ -8,5 +8,7 @@
 7. Once up and running verify aws cli and ssm is up and running and then create image bundle.
 8. Copy the bundle ID and go to Parameter Store and Update the Bundle ID.
 
+https://docs.aws.amazon.com/workspaces/latest/adminguide/cloudformation-templates.html
+
 
    
