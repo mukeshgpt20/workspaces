@@ -10,7 +10,7 @@
    sudo rpm -Uvh /tmp/amazon-ssm-agent.rpm
    sudo systemctl enable --now amazon-ssm-agent
    systemctl status amazon-ssm-agent
-```
+  ```
 7. Now install aws cli and ssm manager.
 8. Once up and running verify aws cli and ssm is up and running and then create image bundle.
 9. Copy the bundle ID and go to Parameter Store and Update the Bundle ID.
