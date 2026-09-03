@@ -19,6 +19,8 @@ https://docs.aws.amazon.com/workspaces/latest/adminguide/cloudformation-template
 
 https://builder.aws.com/content/2hRufiSclspR6yXpyq6sfibIz4W/amazon-workspaces-billing-modes-and-cost-optimization
 https://docs.aws.amazon.com/solutions/latest/cost-optimizer-for-workspaces/templates.html
+Patching:
+https://builder.aws.com/content/30g909ze1jKxXRgnUdfVdsl4icr/automate-maintenance-and-updates-on-amazon-workspaces-personal
 
 
    
