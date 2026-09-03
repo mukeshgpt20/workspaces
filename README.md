@@ -17,5 +17,8 @@
 
 https://docs.aws.amazon.com/workspaces/latest/adminguide/cloudformation-templates.html
 
+https://builder.aws.com/content/2hRufiSclspR6yXpyq6sfibIz4W/amazon-workspaces-billing-modes-and-cost-optimization
+https://docs.aws.amazon.com/solutions/latest/cost-optimizer-for-workspaces/templates.html
+
 
    
