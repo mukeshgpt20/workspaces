@@ -21,6 +21,7 @@ https://builder.aws.com/content/2hRufiSclspR6yXpyq6sfibIz4W/amazon-workspaces-bi
 https://docs.aws.amazon.com/solutions/latest/cost-optimizer-for-workspaces/templates.html
 Patching:
 https://builder.aws.com/content/30g909ze1jKxXRgnUdfVdsl4icr/automate-maintenance-and-updates-on-amazon-workspaces-personal
+https://github.com/aws-samples/sample-automate-workspaces-maintenance/commit/dbb82996539a1c8447cb8cc9e6bb200181488810
 
 
    
