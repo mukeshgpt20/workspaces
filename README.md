@@ -25,6 +25,7 @@ https://github.com/aws-samples/sample-automate-workspaces-maintenance/commit/dbb
 
 CostOptimiser:
 https://aws.amazon.com/blogs/desktop-and-application-streaming/deploy-the-cost-optimizer-for-amazon-workspaces-in-a-highly-regulated-environment/
+https://www.youtube.com/watch?v=VyUIqPVz4Q8
 
 
 
