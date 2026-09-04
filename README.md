@@ -23,5 +23,9 @@ Patching:
 https://builder.aws.com/content/30g909ze1jKxXRgnUdfVdsl4icr/automate-maintenance-and-updates-on-amazon-workspaces-personal
 https://github.com/aws-samples/sample-automate-workspaces-maintenance/commit/dbb82996539a1c8447cb8cc9e6bb200181488810
 
+CostOptimiser:
+https://aws.amazon.com/blogs/desktop-and-application-streaming/deploy-the-cost-optimizer-for-amazon-workspaces-in-a-highly-regulated-environment/
+
+
 
    
