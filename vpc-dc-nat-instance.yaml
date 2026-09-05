@@ -1,0 +1,539 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  Mini Active Directory lab with VPC, NAT instance,
+  Windows Server 2022 Domain Controller, AD DS, DNS and SSM.
+
+Parameters:
+
+  DomainName:
+    Type: String
+    Default: corp.example.com
+
+  NetBIOSName:
+    Type: String
+    Default: CORP
+
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Existing EC2 key pair
+
+  AdministratorPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 14
+    Description: Domain Administrator password
+
+
+Resources:
+
+  # ============================================================
+  # VPC
+  # ============================================================
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+
+      Tags:
+        - Key: Name
+          Value: Mini-AD-VPC
+
+
+  # ============================================================
+  # Internet Gateway
+  # ============================================================
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Mini-AD-IGW
+
+
+  AttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+
+  # ============================================================
+  # PUBLIC SUBNET
+  # ============================================================
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.0.0/24
+
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
+
+      MapPublicIpOnLaunch: true
+
+      Tags:
+        - Key: Name
+          Value: Mini-AD-PublicSubnet
+
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+
+    Properties:
+      VpcId: !Ref VPC
+
+      Tags:
+        - Key: Name
+          Value: Mini-AD-PublicRT
+
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+
+    DependsOn: AttachInternetGateway
+
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+
+  PublicRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+
+  # ============================================================
+  # PRIVATE SUBNET
+  # ============================================================
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
+
+      Tags:
+        - Key: Name
+          Value: Mini-AD-PrivateSubnet
+
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+
+    Properties:
+      VpcId: !Ref VPC
+
+      Tags:
+        - Key: Name
+          Value: Mini-AD-PrivateRT
+
+
+  PrivateRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+
+  # ============================================================
+  # NAT INSTANCE SECURITY GROUP
+  # ============================================================
+
+  NatSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+
+    Properties:
+      GroupDescription: NAT instance security group
+      VpcId: !Ref VPC
+
+      SecurityGroupIngress:
+
+        # Allow private subnet to use NAT
+        - IpProtocol: -1
+          CidrIp: 10.0.1.0/24
+
+      SecurityGroupEgress:
+
+        # Internet access
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+      Tags:
+        - Key: Name
+          Value: Mini-AD-NAT-SG
+
+
+  # ============================================================
+  # NAT INSTANCE
+  #
+  # Amazon Linux 2023 ARM64
+  # t4g.nano
+  # ============================================================
+
+  NatInstance:
+    Type: AWS::EC2::Instance
+
+    DependsOn:
+      - AttachInternetGateway
+
+    Properties:
+
+      InstanceType: t4g.nano
+
+      ImageId:
+        '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}'
+
+      SubnetId: !Ref PublicSubnet
+
+      SecurityGroupIds:
+        - !Ref NatSecurityGroup
+
+      SourceDestCheck: false
+
+      Tags:
+        - Key: Name
+          Value: Mini-AD-NAT
+
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+
+          set -eux
+
+          # Enable IPv4 forwarding
+          sysctl -w net.ipv4.ip_forward=1
+
+          echo "net.ipv4.ip_forward = 1" \
+            >> /etc/sysctl.d/99-nat.conf
+
+          # Configure masquerading
+          dnf install -y iptables-services
+
+          systemctl enable iptables
+          systemctl start iptables
+
+          iptables -t nat \
+            -A POSTROUTING \
+            -o eth0 \
+            -j MASQUERADE
+
+          service iptables save
+
+
+  # ============================================================
+  # PRIVATE ROUTE THROUGH NAT INSTANCE
+  # ============================================================
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+
+    DependsOn:
+      - NatInstance
+
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      InstanceId: !Ref NatInstance
+
+
+  # ============================================================
+  # DOMAIN CONTROLLER SECURITY GROUP
+  # ============================================================
+
+  DomainControllerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+
+    Properties:
+      GroupDescription: Active Directory Domain Controller
+      VpcId: !Ref VPC
+
+      Tags:
+        - Key: Name
+          Value: Mini-AD-DC-SG
+
+      SecurityGroupIngress:
+
+        # DNS
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 10.0.0.0/16
+
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 10.0.0.0/16
+
+        # Kerberos
+        - IpProtocol: tcp
+          FromPort: 88
+          ToPort: 88
+          CidrIp: 10.0.0.0/16
+
+        - IpProtocol: udp
+          FromPort: 88
+          ToPort: 88
+          CidrIp: 10.0.0.0/16
+
+        # LDAP
+        - IpProtocol: tcp
+          FromPort: 389
+          ToPort: 389
+          CidrIp: 10.0.0.0/16
+
+        - IpProtocol: udp
+          FromPort: 389
+          ToPort: 389
+          CidrIp: 10.0.0.0/16
+
+        # SMB
+        - IpProtocol: tcp
+          FromPort: 445
+          ToPort: 445
+          CidrIp: 10.0.0.0/16
+
+        # RPC
+        - IpProtocol: tcp
+          FromPort: 135
+          ToPort: 135
+          CidrIp: 10.0.0.0/16
+
+        # Dynamic RPC
+        - IpProtocol: tcp
+          FromPort: 49152
+          ToPort: 65535
+          CidrIp: 10.0.0.0/16
+
+        # Global Catalog
+        - IpProtocol: tcp
+          FromPort: 3268
+          ToPort: 3268
+          CidrIp: 10.0.0.0/16
+
+        - IpProtocol: tcp
+          FromPort: 3269
+          ToPort: 3269
+          CidrIp: 10.0.0.0/16
+
+        # NTP
+        - IpProtocol: udp
+          FromPort: 123
+          ToPort: 123
+          CidrIp: 10.0.0.0/16
+
+        # RDP - only inside VPC
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 10.0.0.0/16
+
+
+  # ============================================================
+  # IAM ROLE FOR SSM
+  # ============================================================
+
+  DomainControllerRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+
+        Statement:
+          - Effect: Allow
+
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+
+            Action:
+              - sts:AssumeRole
+
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+      Tags:
+        - Key: Name
+          Value: Mini-AD-SSM-Role
+
+
+  DomainControllerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+
+    Properties:
+      Roles:
+        - !Ref DomainControllerRole
+
+
+  # ============================================================
+  # DOMAIN CONTROLLER
+  # ============================================================
+
+  DomainController:
+    Type: AWS::EC2::Instance
+
+    Properties:
+
+      InstanceType: !Ref InstanceType
+
+      ImageId:
+        '{{resolve:ssm:/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base}}'
+
+      KeyName: !Ref KeyName
+
+      IamInstanceProfile:
+        !Ref DomainControllerInstanceProfile
+
+      SubnetId: !Ref PrivateSubnet
+
+      PrivateIpAddress: 10.0.1.10
+
+      SecurityGroupIds:
+        - !Ref DomainControllerSecurityGroup
+
+      BlockDeviceMappings:
+
+        - DeviceName: /dev/sda1
+
+          Ebs:
+            VolumeSize: 50
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+
+      Tags:
+
+        - Key: Name
+          Value: DC01
+
+        - Key: Role
+          Value: DomainController
+
+        - Key: Domain
+          Value: !Ref DomainName
+
+      UserData:
+        Fn::Base64:
+          !Sub |
+            <powershell>
+
+            $ErrorActionPreference = "Stop"
+
+            Start-Transcript `
+              -Path C:\Windows\Temp\ad-bootstrap.log
+
+            Write-Host "Starting AD bootstrap..."
+
+            # --------------------------------------------------
+            # Administrator password
+            # --------------------------------------------------
+
+            $AdminPassword = ConvertTo-SecureString `
+              "${AdministratorPassword}" `
+              -AsPlainText `
+              -Force
+
+            Set-LocalUser `
+              -Name "Administrator" `
+              -Password $AdminPassword
+
+            # --------------------------------------------------
+            # Rename computer
+            # --------------------------------------------------
+
+            Rename-Computer `
+              -NewName "DC01" `
+              -Force
+
+            # --------------------------------------------------
+            # Install AD DS
+            # --------------------------------------------------
+
+            Install-WindowsFeature `
+              AD-Domain-Services `
+              -IncludeManagementTools
+
+            # --------------------------------------------------
+            # Install DNS
+            # --------------------------------------------------
+
+            Install-WindowsFeature `
+              DNS `
+              -IncludeManagementTools
+
+            # --------------------------------------------------
+            # Create AD forest
+            # --------------------------------------------------
+
+            Install-ADDSForest `
+              -DomainName "${DomainName}" `
+              -DomainNetbiosName "${NetBIOSName}" `
+              -SafeModeAdministratorPassword $AdminPassword `
+              -InstallDns `
+              -Force
+
+            </powershell>
+
+
+Outputs:
+
+  VPC:
+    Description: VPC ID
+    Value: !Ref VPC
+
+  PublicSubnet:
+    Description: Public subnet
+    Value: !Ref PublicSubnet
+
+  PrivateSubnet:
+    Description: Private subnet
+    Value: !Ref PrivateSubnet
+
+  NATInstance:
+    Description: NAT instance ID
+    Value: !Ref NatInstance
+
+  DomainController:
+    Description: Domain Controller instance ID
+    Value: !Ref DomainController
+
+  DomainControllerPrivateIP:
+    Description: Domain Controller private IP
+    Value: 10.0.1.10
+
+  Domain:
+    Description: Active Directory domain
+    Value: !Ref DomainName
+
+  DNS:
+    Description: AD DNS server
+    Value: 10.0.1.10
